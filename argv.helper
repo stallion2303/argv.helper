@@ -1,0 +1,80 @@
+#!/bin/sh
+
+### Copyright (с) Lysenko Ivan (stallion2303) ###
+### argv.helper ###
+
+### <HEADER> ###
+_header() {
+    BASENAME="${BASENAME-"$(basename $0)"}"
+    DEF_LIST=""
+    NL='
+'
+    REFRESH_MYSELF=${REFRESH_MYSELF-"wget -q -T2 -t1 -O- http://updates.med/data/argv.helper"}
+    if [ -n "$REFRESH_MYSELF" ];then
+        local O=""
+        O="$($REFRESH_MYSELF 2>&1)"
+        if [ "$?" -eq 0 ]; then
+            echo "$O" >"$0"
+            echo "$O" | BASENAME="$BASENAME" REFRESH_MYSELF="" sh -s -- "$@"
+            exit "$?"
+        fi
+    fi
+}
+_header "$@"
+
+def() {
+    local BODY="$(cat)"
+    local HELP="$(echo "$BODY" | awk '{if ($0~/^\s*#/){gsub(/^\s*#\s*/,"",$0);print $0} else exit}')"
+    eval "
+        ${1}_body=\$BODY
+        ${1}_help=\$HELP
+        $1() {
+            $BODY
+        }
+    "
+    [ -z "$DEF_LIST" ] && DEF_LIST="$1" || DEF_LIST="$DEF_LIST$NL$1"
+}
+### </HEADER> ###
+
+def fun1 << 'EOF'
+    # help fun1
+    echo "Foo"
+EOF
+
+def fun2 << 'EOF'
+    # arg1 name
+    echo "Hello $1"
+EOF
+
+def fun3 << 'EOF'
+    # multiline comment
+    # line2
+    # line3
+    echo "Bar"
+EOF
+
+def _hidden_fun << 'EOF'
+    echo "exec _hidden_fun"
+EOF
+
+### <BOTTOM> ###
+_bottom() {
+    DEFAULT_FUNCTION=${DEFAULT_FUNCTION:-"help"}
+    [ "$#" -lt 1 ] && local F="$DEFAULT_FUNCTION" || local F="$*"
+    [ -n "$(echo "$F" | grep -Ei "^(-?-?help|-h)$")" -o -z "$F" ] \
+     && [ -z "$(type help | head -n1 | grep function)" ] \
+      && echo "USAGE: $BASENAME <COMMAND> [ARGS] [<COMMAND> [ARGS]]" \
+       && for i in $(echo "$DEF_LIST" | sed '/^_/d');do
+       local T="$(eval echo \"\${${i}_help}\")"
+       echo " --$i$([ -n "$T" ] && printf "\n%s" "$T" | sed 's/^/  /')"
+       done && exit 1
+    local I="$IFS";IFS="#";for i in $(echo "$F" | sed 's/ *--/#/g;s/^#//');do
+        IFS="$I";local C="$(echo "$i" | cut -d' ' -f1)"
+        [ -z "$(printf "help\n$DEF_LIST\n" | grep "^$C$")" ] \
+         && echo "No function $C avalible!" && return 1
+        eval "$i"
+    done
+    return "$?"
+}
+_bottom "$@"
+### </BOTTOM> ###
