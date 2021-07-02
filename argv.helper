@@ -9,7 +9,7 @@ _header() {
     DEF_LIST=""
     NL='
 '
-    REFRESH_MYSELF=${REFRESH_MYSELF-"wget -q -T2 -t1 -O- http://updates.med/data/argv.helper"}
+    REFRESH_MYSELF=${REFRESH_MYSELF-"wget -q -T2 -t1 -O- https://raw.githubusercontent.com/stallion2303/argv.helper/main/argv.helper"}
     if [ -n "$REFRESH_MYSELF" ];then
         local O=""
         O="$($REFRESH_MYSELF 2>&1)"
