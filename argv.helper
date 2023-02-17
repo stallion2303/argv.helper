@@ -1,46 +1,57 @@
 #!/bin/sh
 
-### Copyright (с) Lysenko Ivan (stallion2303) ###
+### Copyright (c) Lysenko Ivan (stallion2303) ###
 ### argv.helper ###
 
 ### <HEADER> ###
+### <GLOBAL VARIABLES> ###
+_FULLNAME=${_FULLNAME:-"$(readlink -f "$0")"}
+_DEF_LIST=''
+_DOWNLOAD=${_DOWNLOAD-'wget --quiet --timeout=2 --tries=1
+                        --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/argv.helper'}
+_LIMITER=${_LIMITER-'head -c1m'}
+_DEFAULT_FUNCTION=${_DEFAULT_FUNCTION-'help'}
+### </GLOBAL VARIABLES> ###
 _header() {
-    BASENAME="${BASENAME-"$(basename $0)"}"
-    DEF_LIST=""
-    NL='
-'
-    DOWNLOAD=${DOWNLOAD-'wget --quiet --timeout=2 --tries=1
-                          --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/argv.helper'}
-
-  if [ -n "$DOWNLOAD" ];then
-        local O=""
-        O="$($DOWNLOAD 2>&1)"
+    if [ -n "$_DOWNLOAD" -a "$_LIMITER" ]; then
+        local O=''
+        O="$($_DOWNLOAD 2>&1 | $_LIMITER; r=$?; printf .; exit "$r")"
         if [ "$?" -eq 0 ]; then
-            [ -w "$0" ] && printf '%s\n' "$O" >"$0"
-            printf '%s\n' "$O" | BASENAME="$BASENAME" DOWNLOAD="" sh -s -- "$@"
-            exit "$?"
+            printf '%s' "${O%.}" | cmp -s "$0" -
+            if [ "$?" -ne 0 ]; then
+                [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
+                printf '%s' "${O%.}" | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
+                exit "$?"
+            fi
         fi
     fi
 }
 _header "$@"
 
 def() {
-    local BODY="$(cat)"
-    local HELP="$(echo "$BODY" | awk -v s=0 '{if ($0~/^\s*#/ && s==0){gsub(/^\s*#\s*/,"",$0);print $0} else s=1}')"
+    local BODY="$(cat;printf .)"
+    local HELP="$(echo "${BODY%.}" \
+     | awk '{
+        if ($0~/^[[:space:]]*#/ && s==0){
+            gsub(/^[[:space:]]*#[[:space:]]*/,"",$0);
+            print $0
+        }else{printf ".";exit}}')"
     eval "
-        ${1}_body=\$BODY
-        ${1}_help=\$HELP
+        ${1}_body=\${BODY%.}
+        ${1}_help=\${HELP%.}
         $1() {
-            $BODY
+            ${BODY%.}
         }
     "
-    [ -z "$DEF_LIST" ] && DEF_LIST="$1" || DEF_LIST="$DEF_LIST$NL$1"
+    [ -z "$_DEF_LIST" ] \
+     && _DEF_LIST="$1" \
+     || _DEF_LIST="$(printf '%s\n%s' "$_DEF_LIST" "$1")"
 }
 ### </HEADER> ###
 
 def fun1 << 'EOF'
     # help fun1
-    echo "Foo"
+    echo "Run $_CMD, argv=$_ARGV"
 EOF
 
 def fun2 << 'EOF'
@@ -48,36 +59,41 @@ def fun2 << 'EOF'
     echo "Hello $1"
 EOF
 
-def fun3 << 'EOF'
+def multiline << 'EOF'
     # multiline comment
     # line2
     # line3
-    echo "Bar"
+    #
+    # lineN
+    #
+    printf '%s' "$multiline_help"
+EOF
+
+def show_myself << 'EOF'
+    printf "$show_myself_body"
 EOF
 
 def _hidden_fun << 'EOF'
-    echo "exec _hidden_fun"
+    echo "exec $_CMD"
 EOF
 
 ### <BOTTOM> ###
 _bottom() (
- DEFAULT_FUNCTION=${DEFAULT_FUNCTION-'help'}
- [ "$#" -lt 1 ] && set -- "--${DEFAULT_FUNCTION#--}" -- || set -- "$@" --
- [ -n "$(echo "$@" | grep -E "^(-?-?help|-h) --$")" -o "$*" = '-- --' ] \
-  && [ -z "$(type help | head -n1 | grep -w function)" ] \
-  && echo "Usage: $BASENAME [COMMAND [ARGS]]" \
-  && for i in $(echo "$DEF_LIST" | sed '/^_/d');do
-      H="$(eval echo \"\${${i}_help}\")"
-      echo " --$i$([ -n "$H" ] && printf "\n%s" "$H" | sed 's/^/  /')"
-     done \
-  && exit 1
+ [ "$#" -lt 1 ] && set -- "--${_DEFAULT_FUNCTION#--}" -- || set -- "$@" --
+ [ -z "$(type help | head -n1 | grep -w function)" ] \
+  && _DEF_LIST="$(printf '%s\nhelp' "$_DEF_LIST")" && help() (
+      echo "Usage: $(basename "$_FULLNAME") [COMMAND [ARGS]]"
+      for i in $(printf "$_DEF_LIST" | sed '/^_/d' | sort);do
+       H="$(eval printf '%s.' \"\${${i}_help}\")"
+       echo " --$i$([ -n "${H%.}" ] && printf "\n%s" "${H%.}" | sed 's/^/  /')"
+     done)
  r='';c='';a=''
  for i in "$@";do
   if [ -n "$(echo "$i" | grep '^--')" ];then
    if [ -n "$c" ];then
-    [ -z "$(printf "help\n$DEF_LIST\n" | grep "^$c$")" ] \
+    [ -z "$(printf "$_DEF_LIST" | grep "^$c$")" ] \
      && echo "No function $c avalible!" && return 2
-    eval "$c$a"
+    (_CMD="$c";_ARGV="$a";unset i r c a;eval "$_CMD$_ARGV")
     r="$?";c='';a=''
    fi
    c="$(echo "$i" | sed 's/^--//1')"
