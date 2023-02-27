@@ -1,0 +1,312 @@
+#!/bin/sh
+
+### Copyright (с) Lysenko Ivan (stallion2303) ###
+### http.helper ###
+
+### <HEADER> ###
+### <GLOBAL VARIABLES> ###
+: ${_FULLNAME="$(readlink -f "$0")"}
+: ${_DOWNLOAD='wget --quiet --timeout=2 --tries=1
+                --output-document=- http://conf.med/template/http.helper'}
+: ${_LIMITER='head -c1m'}
+: ${_DEFAULT_FUNCTION='help'}
+_DEF_LIST=''
+### </GLOBAL VARIABLES> ###
+_header() {
+    if [ -n "$_DOWNLOAD" -a "$_LIMITER" ]; then
+        local O=''
+        O="$( ( ( ( ($_DOWNLOAD; echo "$?" >&3; printf .) \
+                  | $_LIMITER >&4) 3>&1) \
+              | (read r; exit "$r") ) 4>&1)"
+        if [ "$?" -eq 0 -a "${#O}" -gt 1 ]; then
+            printf '%s' "${O%.}" | cmp -s "$0" -
+            if [ "$?" -ne 0 ]; then
+                [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
+                printf '%s' "${O%.}" | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
+                exit "$?"
+            fi
+        fi
+    fi
+}
+_header "$@"
+
+def() {
+    local BODY="$(cat; printf .)"
+    local HELP="$(echo "${BODY%.}" \
+     | awk '{
+        if ($0~/^[[:space:]]*#/ && s==0){
+            gsub(/^[[:space:]]*#[[:space:]]*/,"",$0);
+            print $0
+        }else{printf "."; exit}}')"
+    eval "
+        ${1}_body=\${BODY%.}
+        ${1}_help=\${HELP%.}
+        $1() {
+            ${BODY%.}
+        }
+    "
+    [ -z "$_DEF_LIST" ] \
+     && _DEF_LIST="$1" \
+     || _DEF_LIST="$(printf '%s\n%s' "$_DEF_LIST" "$1")"
+}
+### </HEADER> ###
+
+def tests << 'EOF'
+    # Test bundle
+    echo 'run test_echo'
+    test_echo 'foo bar'
+    echo 'run test_cat /etc/issue'
+    test_cat /etc/issue
+    ### multipart not implemented ###
+    # test_file /etc/issue
+    echo 'run test_args arg1 arg2'
+    test_args arg1 arg2
+EOF
+
+def siege << 'EOF'
+    # Load tester
+    : ${HTTP_PORT=8888}
+    : ${HTTP_BIND='127.0.0.1'}
+
+    for arg1 in $(seq 10); do
+        for arg2 in $(seq 10); do
+            wget -q "http://$HTTP_BIND:$HTTP_PORT/test_args/$arg1/$arg2" -O /dev/null &
+            echo "$arg1 $arg2"
+        done
+    done
+    echo 'Done'
+EOF
+
+def test_echo << 'EOF'
+    # Echo text
+    [ -n "$1" ] \
+     && echo "$1" \
+     || echo "Run test_echo"
+EOF
+
+def test_cat << 'EOF'
+    # File as text
+    if [ -n "$1" ]; then
+        [ -f "$1" ] \
+         && cat "$1" \
+         || printf 'File %s not found' "$1"
+    else
+        cat "$0"
+    fi
+EOF
+
+def test_file << 'EOF'
+    # File as attachment (_type_=file,_attachment_=filename)
+    if [ -n "$1" ]; then
+        [ -f "$1" ] \
+         && printf '_type_=file,_attachment_=%s\n' "$1" \
+         || printf "File %s not found" "$1"
+    else
+        printf '_type_=file,_attachment_=%s\n' "$0"
+    fi
+EOF
+
+def test_args << 'EOF'
+    # Passing args (/test_args/arg1/arg2)
+    for v in "$@"; do
+        echo "arg=$v"
+    done
+EOF
+
+### HTTP.HELPER ###
+def _check_system << 'EOF'
+    local REQ=${REQ-'socat=socat file=file wget=wget cmp=diffutils'}
+    local INST_TEXT=''
+    if [ -f /etc/debian_version ]; then
+        INST_TEXT="Run: apt-get update && apt-get install -y"
+    elif [ -f /etc/redhat-release ]; then
+        INST_TEXT="Run: dnf install -y"
+    elif [ -f /etc/alpine-release ]; then
+        INST_TEXT="Run: apk add --no-cache"
+    else
+        echo "unknown system"
+        exit 254
+    fi
+    local NEED=''
+    for r in $REQ; do
+        command -v "$(echo "$r" | cut -d= -f1)" >/dev/null \
+         || NEED="$NEED $(echo "$r" | cut -d= -f2)"
+    done
+    [ -n "$NEED" ] \
+     && printf 'You need to install next packages:%s\n' "$NEED" \
+     && printf '%s%s\n' "${INST_TEXT}" "${NEED}" \
+     && exit 253
+EOF
+
+def http_server << 'EOF'
+    # Start HTTP-Server
+    _check_system
+    : ${HTTP_PORT=8888}
+    : ${HTTP_BIND='127.0.0.1'}
+    printf 'Serving HTTP on %s port %d (http://%s:%d/) ...\n' "$HTTP_BIND" "$HTTP_PORT" "$HTTP_BIND" "$HTTP_PORT"
+    socat tcp4-listen:$HTTP_PORT,bind=$HTTP_BIND,reuseaddr,fork,end-close exec:"$_FULLNAME --_http_request",pipes
+    return 0
+EOF
+
+def _http_response << 'EOF'
+    local REQUEST CODE TEXT TEXTHEADER TYPE NAME CODES ERR ATTACHMENT FN LEN
+
+    REQUEST="$1"
+    CODE="$2"
+    TEXT="$3"
+    TYPE='text/plain'
+    CODES='200 OK#400 Bad Request#405 Method Not Allowed#404 Not Found'
+    ERR=''
+    ATTACHMENT=''
+    LANG=C LC_ALL=C
+    TEXTHEADER="$(echo "$TEXT" | head -c1000 | base64 -d | head -n1)"
+    case "$TEXTHEADER" in
+        '_type_=file,_attachment_='*)
+            TEXT=''
+            FN="$(echo "$TEXTHEADER" | awk -F',' '{split($2, v, "="); print v[2]}')"
+            if [ -f "$FN" ]; then
+                ATTACHMENT="Content-Disposition: attachment; filename=\"$(basename "$FN")\""
+                TYPE="$(file --mime-type --brief "$FN")"
+                LEN="$(stat -c '%s' $FN)"
+            else
+                ERR="File $FN not found"
+                CODE=404
+            fi
+            ;;
+    esac
+
+    NAME="$(echo "$CODES" \
+     | tr '#' '\n' \
+     | sed -nE '/^'"$CODE"'/{s/^[0-9]+ //p}' \
+     | awk '{print}END{if(!NR)print "Unknown"}')"
+
+    [ "$CODE" -ne 200 -a -z "$TEXT" ] \
+     && TEXT="$(printf 'Error code: %s\nMessage: %s\n' "$CODE" "$NAME" | base64)"
+
+    [ -n "$TEXT" -a -z "$LEN" ] \
+     && LEN="$(echo "$TEXT" | base64 -d | wc -c)"
+
+    cat <<OUTPUT
+HTTP/1.1 $CODE $NAME
+Server: $(basename "$_FULLNAME")
+Date: $(date -u '+%a, %d %b %Y %H:%M:%S GMT')
+Content-Type: $TYPE
+Content-Length: $LEN
+Connection: close
+OUTPUT
+    if [ -n "$ATTACHMENT" ]; then
+        printf 'Last-Modified: %s\n' "$(date -u -r "$FN" '+%a, %d %b %Y %H:%M:%S GMT')"
+        printf '%s\n' "$ATTACHMENT"
+        printf '\n'
+        cat "$FN"
+    else
+        printf '\n'
+        echo "$TEXT" | base64 -d
+    fi
+
+    [ -n "$ERR" ] && printf '%s\n' "$ERR" >&2
+    printf '%s - - [%s] "%s" %d %d\n' \
+     "$SOCAT_PEERADDR" \
+     "$(date '+%d/%b/%Y:%H:%M:%S %z')" \
+     "$REQUEST" \
+     "$CODE" \
+     "$LEN" >&2
+    exit 0
+EOF
+
+def _http_rawdecode << 'EOF'
+    awk '
+    BEGIN {
+    hextab ["0"] = 0;   hextab ["8"] = 8;
+    hextab ["1"] = 1;   hextab ["9"] = 9;
+    hextab ["2"] = 2;   hextab ["A"] = hextab ["a"] = 10
+    hextab ["3"] = 3;   hextab ["B"] = hextab ["b"] = 11;
+    hextab ["4"] = 4;   hextab ["C"] = hextab ["c"] = 12;
+    hextab ["5"] = 5;   hextab ["D"] = hextab ["d"] = 13;
+    hextab ["6"] = 6;   hextab ["E"] = hextab ["e"] = 14;
+    hextab ["7"] = 7;   hextab ["F"] = hextab ["f"] = 15;
+    }
+    {
+    decoded = ""
+    i       = 1
+    len     = length($0)
+    while (i <= len) {
+        c = substr($0, i, 1)
+        if (c == "%") {
+            if (i+2 <= len) {
+                c1   = substr($0, i+1, 1)
+                c2   = substr($0, i+2, 1)
+                code = 0 + hextab[c1] * 16 + hextab[c2] + 0
+                c    = sprintf("%c", code)
+                i    = i + 2
+            }
+        } else if (c == "+") {
+            c = " "
+        }
+        decoded = decoded c
+        ++i
+    }
+    gsub(/--/, "-", decoded)
+    printf "%s", decoded
+    }
+'
+EOF
+
+def _http_request << 'EOF'
+    local RAW_REQUEST REQUEST METHOD URI FUNCT OUTPUT
+    if read -t0 line </dev/zero 2>/dev/null; then
+        RAW_REQUEST="$(read -t5 line; echo "$line")"
+    else
+        RAW_REQUEST="$(timeout 5 sh -c 'read line; echo "$line"')"
+    fi
+    REQUEST="$(echo "$RAW_REQUEST" | tr -d '\r\n' \
+                      | grep -E '[a-zA-Z]+\s+[^ ]+\s+([a-zA-Z]+/[0-9\.]+)')"
+    [ -z "$REQUEST" ] && _http_response "$REQUEST" 400
+    METHOD="$(echo "$REQUEST" | awk '{print $1}')"
+    URI="$(echo "$REQUEST" | awk '{print $2}')"
+    ### FILTER URI ###
+    [ -z "$(echo "$URI" | sed -n 's/^\([a-zA-Z0-9_/.%-]*\)$/\1/p')" ] \
+     && _http_response "$REQUEST" 400
+    [ "$METHOD" != "GET" ] && _http_response "$REQUEST" 405
+    FUNCT="$(echo "$URI" \
+     | awk -F'/' -v h="$_DEFAULT_FUNCTION" '{if (length($2)>0){print "--"$2}else{print "--"h}}')"
+    set -- "$FUNCT"
+    for a in $(echo "$URI" | awk -F'/' '{for(i=3;i<=NF;++i) print $i}'); do
+        set -- "$@" "$(echo "$a" | _http_rawdecode)"
+    done
+    OUTPUT="$( ( ( ( (_bottom "$@"; echo "$?" >&3) \
+                  | base64 >&4) 3>&1) \
+              | (read r; exit "$r") ) 4>&1)"
+    [ "$?" -eq 2 ] && _http_response "$REQUEST" 404
+    _http_response "$REQUEST" 200 "$OUTPUT"
+EOF
+### HTTP.HELPER ###
+
+### <BOTTOM> ###
+_bottom() (
+ [ "$#" -lt 1 ] && set -- "--${_DEFAULT_FUNCTION#--}" -- || set -- "$@" --
+ [ -z "$(type help | head -n1 | grep -w function)" ] \
+  && _DEF_LIST="$(printf '%s\nhelp' "$_DEF_LIST")" && help() (
+      echo "Usage: $(basename "$_FULLNAME") [COMMAND [ARGS]]"
+      for i in $(printf "$_DEF_LIST" | sed '/^_/d' | sort); do
+       H="$(eval printf '%s.' \"\${${i}_help}\")"
+       echo " --$i$([ -n "${H%.}" ] && printf "\n%s" "${H%.}" | sed 's/^/  /')"
+     done)
+ r=''; c=''; a=''
+ for i in "$@"; do
+  if [ -n "$(echo "$i" | grep '^--')" ]; then
+   if [ -n "$c" ]; then
+    [ -z "$(printf "$_DEF_LIST" | grep "^$c$")" ] \
+     && echo "No function $c avalible!" && return 2
+    (_CMD="$c"; _ARGV="$a"; unset i r c a; eval "$_CMD$_ARGV")
+    r="$?"; c=''; a=''
+   fi
+   c="$(echo "$i" | sed 's/^--//1')"
+  else
+   a="$a '$i'"
+  fi
+ done
+ [ -n "$r" ] && return "$r" || return 3
+)
+_bottom "$@"
+### </BOTTOM> ###
