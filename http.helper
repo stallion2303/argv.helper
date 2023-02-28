@@ -7,7 +7,7 @@
 ### <GLOBAL VARIABLES> ###
 : ${_FULLNAME="$(readlink -f "$0")"}
 : ${_DOWNLOAD='wget --quiet --timeout=2 --tries=1
-                --output-document=- http://conf.med/template/http.helper'}
+                --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/http.helper'}
 : ${_LIMITER='head -c1m'}
 : ${_DEFAULT_FUNCTION='help'}
 _DEF_LIST=''
@@ -149,14 +149,17 @@ def http_server << 'EOF'
 EOF
 
 def _http_response << 'EOF'
-    local REQUEST CODE TEXT TEXTHEADER TYPE NAME CODES ERR ATTACHMENT FN LEN
+    local CODE TEXT TEXTHEADER TYPE NAME CODES ERR LEN ATTACHMENT FN
 
-    REQUEST="$1"
-    CODE="$2"
-    TEXT="$3"
+    CODE="$1"
+    case "$METHOD" in
+        GET) TEXT="$2" ;;
+        *) TEXT='' ;;
+    esac
     TYPE='text/plain'
-    CODES='200 OK#400 Bad Request#405 Method Not Allowed#404 Not Found'
+    CODES='200=OK|400=Bad Request|405=Method Not Allowed|404=Not Found'
     ERR=''
+    LEN=0
     ATTACHMENT=''
     LANG=C LC_ALL=C
     TEXTHEADER="$(echo "$TEXT" | head -c1000 | base64 -d | head -n1)"
@@ -175,19 +178,16 @@ def _http_response << 'EOF'
             ;;
     esac
 
-    NAME="$(echo "$CODES" \
-     | tr '#' '\n' \
-     | sed -nE '/^'"$CODE"'/{s/^[0-9]+ //p}' \
-     | awk '{print}END{if(!NR)print "Unknown"}')"
-
+    MSG="$(echo "$CODES" \
+     | tr '|' '\n' \
+     | awk -F'=' -v c="$CODE" -v f=0 '$1~c{print $2; f=1}END{if(f==0)print "Unknown"}')"
     [ "$CODE" -ne 200 -a -z "$TEXT" ] \
-     && TEXT="$(printf 'Error code: %s\nMessage: %s\n' "$CODE" "$NAME" | base64)"
-
-    [ -n "$TEXT" -a -z "$LEN" ] \
+     && TEXT="$(printf 'Error code: %s\nMessage: %s\n' "$CODE" "$MSG" | base64)"
+    [ -n "$TEXT" -a "$LEN" -eq 0 ] \
      && LEN="$(echo "$TEXT" | base64 -d | wc -c)"
 
     cat <<OUTPUT
-HTTP/1.1 $CODE $NAME
+HTTP/1.1 $CODE $MSG
 Server: $(basename "$_FULLNAME")
 Date: $(date -u '+%a, %d %b %Y %H:%M:%S GMT')
 Content-Type: $TYPE
@@ -205,12 +205,13 @@ OUTPUT
     fi
 
     [ -n "$ERR" ] && printf '%s\n' "$ERR" >&2
-    printf '%s - - [%s] "%s" %d %d\n' \
+    printf '%s - - [%s] "%s %s %s" %d %d\n' \
      "$SOCAT_PEERADDR" \
      "$(date '+%d/%b/%Y:%H:%M:%S %z')" \
-     "$REQUEST" \
+     "$METHOD" "$URI" "$HTTP" \
      "$CODE" \
      "$LEN" >&2
+
     exit 0
 EOF
 
@@ -253,21 +254,25 @@ def _http_rawdecode << 'EOF'
 EOF
 
 def _http_request << 'EOF'
-    local RAW_REQUEST REQUEST METHOD URI FUNCT OUTPUT
+    local RAW_REQUEST REQUEST METHOD URI HTTP FUNCT OUTPUT
     if read -t0 line </dev/zero 2>/dev/null; then
         RAW_REQUEST="$(read -t5 line; echo "$line")"
     else
         RAW_REQUEST="$(timeout 5 sh -c 'read line; echo "$line"')"
     fi
-    REQUEST="$(echo "$RAW_REQUEST" | tr -d '\r\n' \
-                      | grep -E '[a-zA-Z]+\s+[^ ]+\s+([a-zA-Z]+/[0-9\.]+)')"
-    [ -z "$REQUEST" ] && _http_response "$REQUEST" 400
-    METHOD="$(echo "$REQUEST" | awk '{print $1}')"
+    REQUEST="$(echo "$RAW_REQUEST" \
+     | sed -En '1s#^([a-zA-Z]+)[[:space:]]+([^ ]+)[[:space:]]+(http/[0-9]+\.[0-9]+)\r*$#\1 \2 \3#pI')"
+    [ -z "$REQUEST" ] && _http_response 400
+    METHOD="$(echo "$REQUEST" | awk '{print toupper($1)}')"
     URI="$(echo "$REQUEST" | awk '{print $2}')"
+    HTTP="$(echo "$REQUEST" | awk '{print toupper($3)}')"
     ### FILTER URI ###
     [ -z "$(echo "$URI" | sed -n 's/^\([a-zA-Z0-9_/.%-]*\)$/\1/p')" ] \
-     && _http_response "$REQUEST" 400
-    [ "$METHOD" != "GET" ] && _http_response "$REQUEST" 405
+     && _http_response 400
+    case "$METHOD" in
+        GET|HEAD) ;;
+        *) _http_response 405 ;;
+    esac
     FUNCT="$(echo "$URI" \
      | awk -F'/' -v h="$_DEFAULT_FUNCTION" '{if (length($2)>0){print "--"$2}else{print "--"h}}')"
     set -- "$FUNCT"
@@ -277,8 +282,8 @@ def _http_request << 'EOF'
     OUTPUT="$( ( ( ( (_bottom "$@"; echo "$?" >&3) \
                   | base64 >&4) 3>&1) \
               | (read r; exit "$r") ) 4>&1)"
-    [ "$?" -eq 2 ] && _http_response "$REQUEST" 404
-    _http_response "$REQUEST" 200 "$OUTPUT"
+    [ "$?" -eq 2 ] && _http_response 404
+    _http_response 200 "$OUTPUT"
 EOF
 ### HTTP.HELPER ###
 
