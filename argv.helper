@@ -10,15 +10,14 @@
                 --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/argv.helper'}
 : ${_LIMITER='head -c1m'}
 : ${_DEFAULT_FUNCTION='help'}
-_DEF_LIST=''
 ### </GLOBAL VARIABLES> ###
 _header() {
-    if [ -n "$_DOWNLOAD" -a "$_LIMITER" ]; then
-        local O=''
+    if [ -n "$_DOWNLOAD" ] && [ -n "$_LIMITER" ]; then
+        local O
         O="$( ( ( ( ($_DOWNLOAD; echo "$?" >&3; printf .) \
                   | $_LIMITER >&4) 3>&1) \
               | (read r; exit "$r") ) 4>&1)"
-        if [ "$?" -eq 0 -a "${#O}" -gt 1 ]; then
+        if [ "$?" -eq 0 ] && [ "${#O}" -gt 1 ]; then
             printf '%s' "${O%.}" | cmp -s "$0" -
             if [ "$?" -ne 0 ]; then
                 [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
@@ -31,8 +30,9 @@ _header() {
 _header "$@"
 
 def() {
-    local BODY="$(cat; printf .)"
-    local HELP="$(echo "${BODY%.}" \
+    local BODY HELP
+    BODY="$(cat; printf .)"
+    HELP="$(echo "${BODY%.}" \
      | awk '{
         if ($0~/^[[:space:]]*#/ && s==0){
             gsub(/^[[:space:]]*#[[:space:]]*/,"",$0);
@@ -45,7 +45,7 @@ def() {
             ${BODY%.}
         }
     "
-    [ -z "$_DEF_LIST" ] \
+    [ -z "${_DEF_LIST+x}" ] \
      && _DEF_LIST="$1" \
      || _DEF_LIST="$(printf '%s\n%s' "$_DEF_LIST" "$1")"
 }
