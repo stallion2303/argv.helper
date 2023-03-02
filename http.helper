@@ -10,15 +10,14 @@
                 --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/http.helper'}
 : ${_LIMITER='head -c1m'}
 : ${_DEFAULT_FUNCTION='help'}
-_DEF_LIST=''
 ### </GLOBAL VARIABLES> ###
 _header() {
-    if [ -n "$_DOWNLOAD" -a "$_LIMITER" ]; then
-        local O=''
+    if [ -n "$_DOWNLOAD" ] && [ -n "$_LIMITER" ]; then
+        local O
         O="$( ( ( ( ($_DOWNLOAD; echo "$?" >&3; printf .) \
                   | $_LIMITER >&4) 3>&1) \
               | (read r; exit "$r") ) 4>&1)"
-        if [ "$?" -eq 0 -a "${#O}" -gt 1 ]; then
+        if [ "$?" -eq 0 ] && [ "${#O}" -gt 1 ]; then
             printf '%s' "${O%.}" | cmp -s "$0" -
             if [ "$?" -ne 0 ]; then
                 [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
@@ -31,8 +30,9 @@ _header() {
 _header "$@"
 
 def() {
-    local BODY="$(cat; printf .)"
-    local HELP="$(echo "${BODY%.}" \
+    local BODY HELP
+    BODY="$(cat; printf .)"
+    HELP="$(echo "${BODY%.}" \
      | awk '{
         if ($0~/^[[:space:]]*#/ && s==0){
             gsub(/^[[:space:]]*#[[:space:]]*/,"",$0);
@@ -45,7 +45,7 @@ def() {
             ${BODY%.}
         }
     "
-    [ -z "$_DEF_LIST" ] \
+    [ -z "${_DEF_LIST+x}" ] \
      && _DEF_LIST="$1" \
      || _DEF_LIST="$(printf '%s\n%s' "$_DEF_LIST" "$1")"
 }
@@ -115,16 +115,16 @@ EOF
 
 ### HTTP.HELPER ###
 def _check_system << 'EOF'
-    local REQ=${REQ-'socat=socat file=file wget=wget cmp=diffutils'}
-    local INST_TEXT=''
+    local REQ INST_TEXT
+    REQ=${REQ-'socat=socat file=file wget=wget cmp=diffutils'}
     if [ -f /etc/debian_version ]; then
-        INST_TEXT="Run: apt-get update && apt-get install -y"
+        INST_TEXT='Run: apt-get update && apt-get install -y'
     elif [ -f /etc/redhat-release ]; then
-        INST_TEXT="Run: dnf install -y"
+        INST_TEXT='Run: dnf install -y'
     elif [ -f /etc/alpine-release ]; then
-        INST_TEXT="Run: apk add --no-cache"
+        INST_TEXT='Run: apk add --no-cache'
     else
-        echo "unknown system"
+        echo 'unknown system'
         exit 254
     fi
     local NEED=''
@@ -181,9 +181,9 @@ def _http_response << 'EOF'
     MSG="$(echo "$CODES" \
      | tr '|' '\n' \
      | awk -F'=' -v c="$CODE" -v f=0 '$1~c{print $2; f=1}END{if(f==0)print "Unknown"}')"
-    [ "$CODE" -ne 200 -a -z "$TEXT" ] \
+    [ "$CODE" -ne 200 ] && [ -z "$TEXT" ] \
      && TEXT="$(printf 'Error code: %s\nMessage: %s\n' "$CODE" "$MSG" | base64)"
-    [ -n "$TEXT" -a "$LEN" -eq 0 ] \
+    [ -n "$TEXT" ] && [ "$LEN" -eq 0 ] \
      && LEN="$(echo "$TEXT" | base64 -d | wc -c)"
 
     cat <<OUTPUT
