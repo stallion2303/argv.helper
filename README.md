@@ -23,3 +23,8 @@ Server **./http.helper --http_server**
 Client **curl http://localhost:8888/test_echo/Hello%20World%21**
 
 `Hello World!`
+
+## Tested Environments
+
+docker [ apline:latest | debian:latest | ubuntu:latest | rockylinux:latest ]
+ 
