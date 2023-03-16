@@ -5,23 +5,23 @@
 
 ### <HEADER> ###
 ### <GLOBAL VARIABLES> ###
-: ${_FULLNAME="$(readlink -f "$0")"}
-: ${_DOWNLOAD='wget --quiet --timeout=2 --tries=1
-                --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/argv.helper'}
-: ${_LIMITER='head -c1m'}
-: ${_DEFAULT_FUNCTION='help'}
+: "${_FULLNAME=$(readlink -f "$0")}"
+: "${_DOWNLOAD=wget --quiet --timeout=2 --tries=1
+                --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/argv.helper}"
+: "${_LIMITER=head -c1m}"
+: "${_DEFAULT_FUNCTION=help}"
 ### </GLOBAL VARIABLES> ###
 _header() {
     if [ -n "$_DOWNLOAD" ] && [ -n "$_LIMITER" ]; then
         local O
         O="$( ( ( ( ($_DOWNLOAD; echo "$?" >&3; printf .) \
                   | $_LIMITER >&4) 3>&1) \
-              | (read r; exit "$r") ) 4>&1)"
+              | (read -r r; exit "$r") ) 4>&1)"
         if [ "$?" -eq 0 ] && [ "${#O}" -gt 1 ]; then
-            printf '%s' "${O%.}" | cmp -s "$0" -
-            if [ "$?" -ne 0 ]; then
+            if ! printf '%s' "${O%.}" | cmp -s "$0" -; then
                 [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
-                printf '%s' "${O%.}" | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
+                printf '%s' "${O%.}" \
+                 | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
                 exit "$?"
             fi
         fi
@@ -82,20 +82,20 @@ EOF
 ### <BOTTOM> ###
 _bottom() (
  [ "$#" -lt 1 ] && set -- "--${_DEFAULT_FUNCTION#--}" -- || set -- "$@" --
- [ -z "$(type help | head -n1 | grep -w function)" ] \
-  && _DEF_LIST="$(printf '%s\nhelp' "$_DEF_LIST")" && help() (
+ type help | head -n1 | grep -qw function \
+  || { _DEF_LIST="$(printf '%s\nhelp' "$_DEF_LIST")"; help() (
       echo "Usage: $(basename "$_FULLNAME") [COMMAND [ARGS]]"
-      for i in $(printf "$_DEF_LIST" | sed '/^_/d' | sort); do
-       H="$(eval printf '%s.' \"\${${i}_help}\")"
+      for i in $(echo "$_DEF_LIST" | sed '/^_/d' | sort); do
+       H="$(eval printf '%s.' \"\$"${i}"_help\")"
        echo " --$i$([ -n "${H%.}" ] && printf "\n%s" "${H%.}" | sed 's/^/  /')"
-     done)
+     done); }
  r=''; c=''; a=''
  for i in "$@"; do
-  if [ -n "$(echo "$i" | grep '^--')" ]; then
+  if echo "$i" | grep -q '^--'; then
    if [ -n "$c" ]; then
-    [ -z "$(printf "$_DEF_LIST" | grep "^$c$")" ] \
-     && echo "No function $c avalible!" && return 2
-    (_CMD="$c"; _ARGV="$a"; unset i r c a; eval "$_CMD$_ARGV")
+    echo "$_DEF_LIST" | grep -q "^$c$" \
+     || { echo "No function $c avalible!"; return 2;}
+    (_CMD="$c"; _ARGV="${a# }"; unset i r c a; eval "$_CMD $_ARGV")
     r="$?"; c=''; a=''
    fi
    c="$(echo "$i" | sed 's/^--//1')"
