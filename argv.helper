@@ -88,7 +88,7 @@ _bottom() (
       for i in $(echo "$_DEF_LIST" | sed '/^_/d' | sort); do
        H="$(eval printf '%s.' \"\$"${i}"_help\")"
        echo " --$i$([ -n "${H%.}" ] && printf "\n%s" "${H%.}" | sed 's/^/  /')"
-     done); }
+     done);}
  r=''; c=''; a=''
  for i in "$@"; do
   if echo "$i" | grep -q '^--'; then
@@ -98,7 +98,7 @@ _bottom() (
     (_CMD="$c"; _ARGV="${a# }"; unset i r c a; eval "$_CMD $_ARGV")
     r="$?"; c=''; a=''
    fi
-   c="$(echo "$i" | sed 's/^--//1')"
+   c="${i#--}"
   else
    a="$a '$i'"
   fi
