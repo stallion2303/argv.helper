@@ -5,23 +5,24 @@
 
 ### <HEADER> ###
 ### <GLOBAL VARIABLES> ###
-: ${_FULLNAME="$(readlink -f "$0")"}
-: ${_DOWNLOAD='wget --quiet --timeout=2 --tries=1
-                --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/http.helper'}
-: ${_LIMITER='head -c1m'}
-: ${_DEFAULT_FUNCTION='help'}
+: "${_FULLNAME=$(readlink -f "$0")}"
+: "${_DOWNLOAD=wget --quiet --timeout=2 --tries=1
+                --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/http.helper}"
+: "${_LIMITER=head -c1m}"
+: "${_DEFAULT_FUNCTION=help}"
 ### </GLOBAL VARIABLES> ###
 _header() {
-    if [ -n "$_DOWNLOAD" ] && [ -n "$_LIMITER" ]; then
+    if [ -n "$_DOWNLOAD" ] && [ -n "$_LIMITER" ] && \
+       command -v "$(echo "$_DOWNLOAD" | awk 'NR==1{print $1}')" >/dev/null; then
         local O
         O="$( ( ( ( ($_DOWNLOAD; echo "$?" >&3; printf .) \
                   | $_LIMITER >&4) 3>&1) \
-              | (read r; exit "$r") ) 4>&1)"
+              | (read -r r; exit "$r") ) 4>&1)"
         if [ "$?" -eq 0 ] && [ "${#O}" -gt 1 ]; then
-            printf '%s' "${O%.}" | cmp -s "$0" -
-            if [ "$?" -ne 0 ]; then
+            if ! printf '%s' "${O%.}" | cmp -s "$0" -; then
                 [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
-                printf '%s' "${O%.}" | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
+                printf '%s' "${O%.}" \
+                 | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
                 exit "$?"
             fi
         fi
@@ -65,8 +66,8 @@ EOF
 
 def siege << 'EOF'
     # Load tester
-    : ${HTTP_PORT=8888}
-    : ${HTTP_BIND='127.0.0.1'}
+    : "${HTTP_PORT=8888}"
+    : "${HTTP_BIND=127.0.0.1}"
 
     for arg1 in $(seq 10); do
         for arg2 in $(seq 10); do
@@ -115,8 +116,8 @@ EOF
 
 ### HTTP.HELPER ###
 def _check_system << 'EOF'
-    local REQ INST_TEXT
-    REQ=${REQ-'socat=socat file=file wget=wget cmp=diffutils'}
+    local REQ INST_TEXT NEED
+    : "${REQ=socat=socat file=file wget=wget cmp=diffutils}"
     if [ -f /etc/debian_version ]; then
         INST_TEXT='Run: apt-get update && apt-get install -y'
     elif [ -f /etc/redhat-release ]; then
@@ -127,7 +128,6 @@ def _check_system << 'EOF'
         echo 'unknown system'
         exit 254
     fi
-    local NEED=''
     for r in $REQ; do
         command -v "$(echo "$r" | cut -d= -f1)" >/dev/null \
          || NEED="$NEED $(echo "$r" | cut -d= -f2)"
@@ -141,15 +141,17 @@ EOF
 def http_server << 'EOF'
     # Start HTTP-Server
     _check_system
-    : ${HTTP_PORT=8888}
-    : ${HTTP_BIND='127.0.0.1'}
-    printf 'Serving HTTP on %s port %d (http://%s:%d/) ...\n' "$HTTP_BIND" "$HTTP_PORT" "$HTTP_BIND" "$HTTP_PORT"
-    socat tcp4-listen:$HTTP_PORT,bind=$HTTP_BIND,reuseaddr,fork,end-close exec:"$_FULLNAME --_http_request",pipes
+    : "${HTTP_PORT=8888}"
+    : "${HTTP_BIND=127.0.0.1}"
+    printf 'Serving HTTP on %s port %d (http://%s:%d/) ...\n' \
+     "$HTTP_BIND" "$HTTP_PORT" "$HTTP_BIND" "$HTTP_PORT"
+    socat tcp4-listen:$HTTP_PORT,bind=$HTTP_BIND,reuseaddr,fork,end-close \
+     exec:"$_FULLNAME --_http_request",pipes
     return 0
 EOF
 
 def _http_response << 'EOF'
-    local CODE TEXT TEXTHEADER TYPE NAME CODES ERR LEN ATTACHMENT FN
+    local CODE TEXT TEXTHEADER TYPE MSG CODES ERR LEN ATTACHMENT FN
 
     CODE="$1"
     case "$METHOD" in
@@ -170,7 +172,7 @@ def _http_response << 'EOF'
             if [ -f "$FN" ]; then
                 ATTACHMENT="Content-Disposition: attachment; filename=\"$(basename "$FN")\""
                 TYPE="$(file --mime-type --brief "$FN")"
-                LEN="$(stat -c '%s' $FN)"
+                LEN="$(stat -c '%s' "$FN")"
             else
                 ERR="File $FN not found"
                 CODE=404
@@ -254,13 +256,14 @@ def _http_rawdecode << 'EOF'
 EOF
 
 def _http_request << 'EOF'
-    local RAW_REQUEST REQUEST METHOD URI HTTP FUNCT OUTPUT
-    if read -t0 line </dev/zero 2>/dev/null; then
-        RAW_REQUEST="$(read -t5 line; echo "$line")"
-    else
-        RAW_REQUEST="$(timeout 5 sh -c 'read line; echo "$line"')"
-    fi
-    REQUEST="$(echo "$RAW_REQUEST" \
+    local RAW_REQUEST REQUEST METHOD URI HTTP FUNCT OUTPUT TIMEOUT
+    : "${TIMEOUT=5}"
+
+    RAW_REQUEST="$( ( ( ( (timeout "$TIMEOUT" sh -c 'read -r l; echo "$l"'; echo "$?" >&3; printf .) \
+                        | $_LIMITER >&4) 3>&1) \
+                    | (read -r r; exit "$r") ) 4>&1)" \
+     || exit 0
+    REQUEST="$(echo "${RAW_REQUEST%.}" \
      | sed -En '1s#^([a-zA-Z]+)[[:space:]]+([^ ]+)[[:space:]]+(http/[0-9]+\.[0-9]+)\r*$#\1 \2 \3#pI')"
     [ -z "$REQUEST" ] && _http_response 400
     METHOD="$(echo "$REQUEST" | awk '{print toupper($1)}')"
@@ -281,7 +284,7 @@ def _http_request << 'EOF'
     done
     OUTPUT="$( ( ( ( (_bottom "$@"; echo "$?" >&3) \
                   | base64 >&4) 3>&1) \
-              | (read r; exit "$r") ) 4>&1)"
+              | (read -r r; exit "$r") ) 4>&1)"
     [ "$?" -eq 2 ] && _http_response 404
     _http_response 200 "$OUTPUT"
 EOF
@@ -290,23 +293,23 @@ EOF
 ### <BOTTOM> ###
 _bottom() (
  [ "$#" -lt 1 ] && set -- "--${_DEFAULT_FUNCTION#--}" -- || set -- "$@" --
- [ -z "$(type help | head -n1 | grep -w function)" ] \
-  && _DEF_LIST="$(printf '%s\nhelp' "$_DEF_LIST")" && help() (
+ type help | head -n1 | grep -qw function \
+  || { _DEF_LIST="$(printf '%s\nhelp' "$_DEF_LIST")"; help() (
       echo "Usage: $(basename "$_FULLNAME") [COMMAND [ARGS]]"
-      for i in $(printf "$_DEF_LIST" | sed '/^_/d' | sort); do
-       H="$(eval printf '%s.' \"\${${i}_help}\")"
+      for i in $(echo "$_DEF_LIST" | sed '/^_/d' | sort); do
+       H="$(eval printf '%s.' \"\$"${i}"_help\")"
        echo " --$i$([ -n "${H%.}" ] && printf "\n%s" "${H%.}" | sed 's/^/  /')"
-     done)
+     done);}
  r=''; c=''; a=''
  for i in "$@"; do
-  if [ -n "$(echo "$i" | grep '^--')" ]; then
+  if echo "$i" | grep -q '^--'; then
    if [ -n "$c" ]; then
-    [ -z "$(printf "$_DEF_LIST" | grep "^$c$")" ] \
-     && echo "No function $c avalible!" && return 2
-    (_CMD="$c"; _ARGV="$a"; unset i r c a; eval "$_CMD$_ARGV")
+    echo "$_DEF_LIST" | grep -q "^$c$" \
+     || { echo "No function $c avalible!"; return 2;}
+    (_CMD="$c"; _ARGV="${a# }"; unset i r c a; eval "$_CMD $_ARGV")
     r="$?"; c=''; a=''
    fi
-   c="$(echo "$i" | sed 's/^--//1')"
+   c="${i#--}"
   else
    a="$a '$i'"
   fi
