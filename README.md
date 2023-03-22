@@ -1,5 +1,14 @@
+Librares for coding shell scripts
+
 # argv.helper
-Library for coding shell scripts
+
+It is required to describe the functions as
+
+```
+def fun << 'EOF'
+    echo 'exec fun'
+EOF
+```
 
 The helper updates its content and allows you to exec functions as command line arguments
 
@@ -10,7 +19,6 @@ For example:
 `Hello world!`
 
 # http.helper
-Library for coding shell scripts
 
 The helper uses **socat** and allows you to exec functions over http
 
@@ -23,6 +31,16 @@ Server **./http.helper --http_server**
 Client **curl http://localhost:8888/test_echo/Hello%20World%21**
 
 `Hello World!`
+
+# argv.helper.legacy
+
+Just add it to your script and exec functions as command line arguments
+
+For example:
+
+**./argv.helper.legacy --fun2**
+
+`fun2`
 
 ## Tested Environments
 
