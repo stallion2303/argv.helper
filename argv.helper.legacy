@@ -1,0 +1,44 @@
+#!/bin/sh
+
+fun1() {
+    cat << EOF
+_DEF_LIST=$_DEF_LIST
+_DEFAULT_FUNCTION=$_DEFAULT_FUNCTION
+_CMD=$_CMD
+_ARGV=$_ARGV
+EOF
+}
+
+fun2_help="fun2 help"
+fun2() {
+    echo fun2
+}
+
+_argv_main() (
+ : "${_DEFAULT_FUNCTION=help}"
+ _DEF_LIST="$(sed -En 's/^([a-zA-Z_][0-9a-zA-Z_]*)\s*\(\)\s*[{(]/\1/p' "$0")"
+ [ "$#" -lt 1 ] && set -- "--${_DEFAULT_FUNCTION#--}" -- || set -- "$@" --
+ type help | head -n1 | grep -qw function \
+  || { _DEF_LIST="$(printf 'help\n%s' "$_DEF_LIST")"; help() (
+      echo "Usage: $(basename "$0") [COMMAND [ARGS]]"
+      for i in $(printf '%s' "$_DEF_LIST" | sed '/^_/d' | sort); do
+       H="$(eval printf '%s.' \"\$"${i}"_help\")"
+       echo " --$i$([ -n "${H%.}" ] && printf "\n%s" "${H%.}" | sed 's/^/  /')"
+     done);}
+ r=''; c=''; a=''
+ for i in "$@"; do
+  if echo "$i" | grep -q '^--'; then
+   if [ -n "$c" ]; then
+    echo "$_DEF_LIST" | grep -q "^$c$" \
+     || { echo "No function $c avalible!"; return 2;}
+    (_CMD="$c"; _ARGV="${a# }"; unset i r c a; eval "$_CMD $_ARGV")
+    r="$?"; c=''; a=''
+   fi
+   c="${i#--}"
+  else
+   a="$a '$i'"
+  fi
+ done
+ [ -n "$r" ] && return "$r" || return 3
+)
+_argv_main "$@"
