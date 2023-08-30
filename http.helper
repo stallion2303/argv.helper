@@ -9,6 +9,7 @@
 : "${_DOWNLOAD=wget --quiet --timeout=2 --tries=1
                 --output-document=- https://raw.githubusercontent.com/stallion2303/argv.helper/main/http.helper}"
 : "${_LIMITER=head -c1m}"
+: "${TMPDIR=/dev/shm}"
 : "${_DEFAULT_FUNCTION=help}"
 ### </GLOBAL VARIABLES> ###
 _header() {
@@ -20,7 +21,10 @@ _header() {
               | (read -r r; exit "$r") ) 4>&1)"
         if [ "$?" -eq 0 ] && [ "${#O}" -gt 1 ]; then
             if ! printf '%s' "${O%.}" | cmp -s "$0" -; then
-                [ -w "$0" ] && printf '%s' "${O%.}" >"$0"
+                if [ -w "$0" ]; then
+                    printf '%s' "${O%.}" 1<> "$0"
+                    truncate -s "$(printf '%s' "${O%.}" | wc -c)" "$0"
+                fi
                 printf '%s' "${O%.}" \
                  | _FULLNAME="$_FULLNAME" _DOWNLOAD='' sh -s -- "$@"
                 exit "$?"
