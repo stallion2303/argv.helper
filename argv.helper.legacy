@@ -36,7 +36,8 @@ _argv_main() (
    fi
    c="${i#--}"
   else
-   a="$a '$i'"
+   echo "$i" | grep -q "'" \
+    && a="$a \"$i\"" || a="$a '$i'"
   fi
  done
  [ -n "$r" ] && return "$r" || return 3
